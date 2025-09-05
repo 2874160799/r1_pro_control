@@ -8,6 +8,6 @@ def generate_launch_description():
             executable='track_node',
             name='track_node',
             output='screen',
-            parameters=[{'device_id':0}]
+            parameters=[{'device_leftfront':0}]
         )
     ])

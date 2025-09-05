@@ -1,26 +1,31 @@
-
 #include <iostream>
 #include <chrono>
 #include <rclcpp/rclcpp.hpp>
 #include "track/track.hpp"
-#define LEFT 224;
+
+#define LEFT 224
 using namespace std;
 
+// 多线程进入摄像头回调
 TrackNode::TrackNode(const rclcpp::NodeOptions & options) : Node("track_node",options){
     RCLCPP_INFO(this->get_logger(),"start TrackNode");
-    int device_id = this->declare_parameter<int>("device_id",0);
+    int device_leftfront = this->declare_parameter<int>("device_leftfront",0);
+    int device_rightfront = this->declare_parameter<int>("device_rightfront",1);
+    int device_left = this->declare_parameter<int>("device_left",2);
+    int device_right = this->declare_parameter<int>("device_right",3);
+    int device_back = this->declare_parameter<int>("device_back",4);
 
     cmd_pub_ = this->create_publisher<geometry_msgs::msg::TwistStamped>("/motion_target/target_speed_chassis",10);
 
-    //开启摄像头
-    cap_.open(device_id);
-    cap_.set(cv::CAP_PROP_FRAME_WIDTH,camera_width);
-    cap_.set(cv::CAP_PROP_FRAME_HEIGHT,camera_height);
-    if (!cap_.isOpened()){
-        RCLCPP_ERROR(this->get_logger(),"Failed to open device id: %d!",device_id);
-    } else {
-        RCLCPP_INFO(this->get_logger(),"Successfully opened device id: %d!",device_id);
-    }
+
+    initCamera(cap_leftfront_,device_leftfront,"leftfront");
+    initCamera(cap_rightfront_,device_rightfront,"rightfront");
+    initCamera(cap_left_,device_left,"left");
+    initCamera(cap_right_,device_right,"right");
+    initCamera(cap_back_,device_back,"back");
+
+
+ 
 
     //创建滑动条窗口
     // cv::namedWindow("h_binary");
@@ -39,45 +44,139 @@ TrackNode::TrackNode(const rclcpp::NodeOptions & options) : Node("track_node",op
     // cv::createTrackbar("L min", "l_binary", &lmin_, 255);
     // cv::createTrackbar("L max", "l_binary", &lmax_, 255);
 
-    //定时器读取摄像头内容
+    //定时器读取左前摄像头内容
     timer_ = this->create_wall_timer(
         std::chrono::milliseconds(30),
         std::bind(&TrackNode::camera_timer_callback,this)
     );
+    //定时器读取右前摄像头内容
+    rightFrontTimer_ = this->create_wall_timer(
+        std::chrono::milliseconds(30),
+        std::bind(&TrackNode::cameraRightFront_timer_callbcak,this)
+    );
+    //定时器读取左摄像头内容
+    leftTimer_ = this->create_wall_timer(
+        std::chrono::milliseconds(30),
+        std::bind(&TrackNode::cameraLeft_timer_callback,this)
+    );
+    rightTimer_ = this->create_wall_timer(
+        std::chrono::milliseconds(30),
+        std::bind(&TrackNode::cameraRight_timer_callback,this)
+    );
+    backTimer_ = this->create_wall_timer(
+        std::chrono::milliseconds(30),
+        std::bind(&TrackNode::cameraBack_timer_callback,this)
+    );    
+    
+
 }
 
 TrackNode::~TrackNode(){
-    if (cap_.isOpened()){
-        cap_.release();
+    if (cap_leftfront_.isOpened()){
+        cap_leftfront_.release();
     }
     cv::destroyAllWindows();
     RCLCPP_INFO(this->get_logger(), "TrackNode destroyed, camera released");
 }
 
+
+bool TrackNode::initCamera(cv::VideoCapture& cap,int device_id,const std::string& name){
+    cap.open(device_id);
+    cap.set(cv::CAP_PROP_FRAME_WIDTH,camera_width);
+    cap.set(cv::CAP_PROP_FRAME_HEIGHT,camera_height);
+    if (!cap.isOpened()){
+        RCLCPP_ERROR(this->get_logger(),"Failed to open %s camera id: %d!",name.c_str(),device_id);
+        return false;
+    }
+    RCLCPP_INFO(this->get_logger(),"Successfully opened %s camera id: %d!",name.c_str(),device_id);
+    return true;
+}
+
+
+//左前摄像头回调函数
 void TrackNode::camera_timer_callback(){
     cv::Mat frame;
-    if (!cap_.read(frame)){
-        RCLCPP_WARN(this->get_logger(),"Failed to read frame from camera.");
+    if (!cap_leftfront_.read(frame)){
+        RCLCPP_WARN(this->get_logger(),"Failed to read frame from LeftFrontCamera.");
         return;
     }
     if (!frame.empty()){
-        cv::Mat binary = this->hls_process(frame);
-        int error = this->showLine(binary,frame);
+        // cv::Mat binary = this->hls_process(frame);
+        // int error = this->showLine(binary,frame);
         // std::cout << "error:" << error << std::endl;
 
-        cv::Mat small;
-        cv::resize(binary, small, cv::Size(), 0.5, 0.5);  // 缩小一半
-        cv::imshow("binary", small);
+        // cv::Mat small;
+        // cv::resize(binary, small, cv::Size(), 0.5, 0.5);  // 缩小一半
+        // cv::imshow("binary", small);
         cv::Mat small_frame;
         cv::resize(frame,small_frame,cv::Size(),0.5,0.5);
-        cv::imshow("frame_with_line",small_frame);
+        cv::imshow("camera_leftfront",small_frame);
 
-        this->chassisControl(error);
+        // this->chassisControl(error);
         int key = cv::waitKey(1);
         if (key == 27){
             RCLCPP_INFO(this->get_logger(),"ESC pressed, shutting down.");
             rclcpp::shutdown();
         }
+    }
+}
+
+
+//右前摄像头回调函数
+void TrackNode::cameraRightFront_timer_callbcak(){
+    cv::Mat frame;
+    if (!cap_rightfront_.read(frame)){
+        RCLCPP_WARN(this->get_logger(),"Failed to read frame from RightFrontCamera.");
+        return;
+    }
+    if (!frame.empty()){
+        // cv::Mat binary = this->hls_process(frame);
+        cv::Mat small_frame;
+        cv::resize(frame,small_frame,cv::Size(),0.5,0.5);
+        cv::imshow("camera_rightfront",small_frame);
+    }
+}
+
+//左摄像头回调函数
+void TrackNode::cameraLeft_timer_callback(){
+    cv::Mat frame;
+    if (!cap_left_.read(frame)){
+        RCLCPP_WARN(this->get_logger(),"Failed to read frame from LeftCamera.");
+        return;
+    }
+    if (!frame.empty()){
+        // cv::Mat binary = this->hls_process(frame);
+        cv::Mat small_frame;
+        cv::resize(frame,small_frame,cv::Size(),0.5,0.5);
+        cv::imshow("camera_left",small_frame);
+    }
+}
+//右摄像头回调函数
+void TrackNode::cameraRight_timer_callback(){
+    cv::Mat frame;
+    if (!cap_right_.read(frame)){
+        RCLCPP_WARN(this->get_logger(),"Failed to read frame from RightCamera.");
+        return;
+    }
+    if (!frame.empty()){
+        // cv::Mat binary = this->hls_process(frame);
+        cv::Mat small_frame;
+        cv::resize(frame,small_frame,cv::Size(),0.5,0.5);
+        cv::imshow("camera_right",small_frame);
+    }
+}
+//后摄像头回调函数
+void TrackNode::cameraBack_timer_callback(){
+    cv::Mat frame;
+    if (!cap_back_.read(frame)){
+        RCLCPP_WARN(this->get_logger(),"Failed to read frame from BackCamera.");
+        return;
+    }
+    if (!frame.empty()){
+        // cv::Mat binary = this->hls_process(frame);
+        cv::Mat small_frame;
+        cv::resize(frame,small_frame,cv::Size(),0.5,0.5);
+        cv::imshow("camera_back",small_frame);
     }
 }
 //原始图像转hls图像

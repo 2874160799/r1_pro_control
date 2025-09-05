@@ -11,9 +11,22 @@ class TrackNode : public rclcpp::Node{
 private:
     int camera_width = 1920;
     int camera_height = 1080;
-    cv::VideoCapture cap_;
+    cv::VideoCapture cap_leftfront_;
+    cv::VideoCapture cap_rightfront_;
+    cv::VideoCapture cap_left_;
+    cv::VideoCapture cap_right_;
+    cv::VideoCapture cap_back_;
 
     rclcpp::TimerBase::SharedPtr timer_;//定时读取摄像头帧的定时器
+    rclcpp::TimerBase::SharedPtr rightFrontTimer_;//定时读取右前摄像头的定时器
+    rclcpp::TimerBase::SharedPtr leftTimer_;
+    rclcpp::TimerBase::SharedPtr rightTimer_;
+    rclcpp::TimerBase::SharedPtr backTimer_;
+
+    rclcpp::TimerBase::SharedPtr displayTimer_;
+
+    cv::Mat frame_leftfront_,frame_rightfront_,frame_left_,frame_right_,frame_back_;
+    std::mutex mtx_;
 
     // HLS 阈值参数（滑动条绑定的变量）
     int hmin_, hmax_;
@@ -34,7 +47,15 @@ public:
     double prev_error = 0.0;
     double integral = 0.0;
 
+    bool initCamera(cv::VideoCapture& cap,int device_id,const std::string& name);
+
     void camera_timer_callback();
+    void cameraRightFront_timer_callbcak();
+    void cameraLeft_timer_callback();
+    void cameraRight_timer_callback();
+    void cameraBack_timer_callback();
+
+    void display_timer_callback();
 
     cv::Mat hsv_process(const cv::Mat& oriFrame);
 
