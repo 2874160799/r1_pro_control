@@ -2,8 +2,10 @@
 #include <chrono>
 #include <rclcpp/rclcpp.hpp>
 #include "track/track.hpp"
+#include <nlohmann/json.hpp>
+#include <fstream>
 
-#define LEFT 224
+#define LEFT 224-9
 using namespace std;
 
 // 多线程进入摄像头回调
@@ -15,7 +17,16 @@ TrackNode::TrackNode(const rclcpp::NodeOptions & options) : Node("track_node",op
     int device_right = this->declare_parameter<int>("device_right",3);
     int device_back = this->declare_parameter<int>("device_back",4);
 
+    hmin_ = this->declare_parameter<int>("hmin", 0);
+    hmax_ = this->declare_parameter<int>("hmax", 180);
+    smin_ = this->declare_parameter<int>("smin", 0);
+    smax_ = this->declare_parameter<int>("smax", 255);
+    lmin_ = this->declare_parameter<int>("lmin", 0);
+    lmax_ = this->declare_parameter<int>("lmax", 130);
+
     cmd_pub_ = this->create_publisher<geometry_msgs::msg::TwistStamped>("/motion_target/target_speed_chassis",10);
+
+    skeleton_pub_ = this->create_publisher<track::msg::SkeletonPoints>("skeleton_points", 10);
 
 
     initCamera(cap_leftfront_,device_leftfront,"leftfront");
@@ -24,49 +35,46 @@ TrackNode::TrackNode(const rclcpp::NodeOptions & options) : Node("track_node",op
     initCamera(cap_right_,device_right,"right");
     initCamera(cap_back_,device_back,"back");
 
-
- 
-
     //创建滑动条窗口
     // cv::namedWindow("h_binary");
     // cv::namedWindow("s_binary");
-    // cv::namedWindow("l_binary");
+    cv::namedWindow("l_binary");
     // cv::namedWindow("binary");
 
     // hmin_ = 0; hmax_ = 180;
     // smin_ = 0; smax_ = 255;
     // lmin_ = 160; lmax_ = 255;
 
-    // cv::createTrackbar("H min", "h_binary", &hmin_, 180);
-    // cv::createTrackbar("H max", "h_binary", &hmax_, 180);
-    // cv::createTrackbar("S min", "s_binary", &smin_, 255);
-    // cv::createTrackbar("S max", "s_binary", &smax_, 255);
-    // cv::createTrackbar("L min", "l_binary", &lmin_, 255);
-    // cv::createTrackbar("L max", "l_binary", &lmax_, 255);
+    cv::createTrackbar("H min", "h_binary", &hmin_, 180);
+    cv::createTrackbar("H max", "h_binary", &hmax_, 180);
+    cv::createTrackbar("S min", "s_binary", &smin_, 255);
+    cv::createTrackbar("S max", "s_binary", &smax_, 255);
+    cv::createTrackbar("L min", "l_binary", &lmin_, 255);
+    cv::createTrackbar("L max", "l_binary", &lmax_, 255);
 
     //定时器读取左前摄像头内容
     timer_ = this->create_wall_timer(
         std::chrono::milliseconds(30),
         std::bind(&TrackNode::camera_timer_callback,this)
     );
-    //定时器读取右前摄像头内容
-    rightFrontTimer_ = this->create_wall_timer(
-        std::chrono::milliseconds(30),
-        std::bind(&TrackNode::cameraRightFront_timer_callbcak,this)
-    );
-    //定时器读取左摄像头内容
-    leftTimer_ = this->create_wall_timer(
-        std::chrono::milliseconds(30),
-        std::bind(&TrackNode::cameraLeft_timer_callback,this)
-    );
-    rightTimer_ = this->create_wall_timer(
-        std::chrono::milliseconds(30),
-        std::bind(&TrackNode::cameraRight_timer_callback,this)
-    );
-    backTimer_ = this->create_wall_timer(
-        std::chrono::milliseconds(30),
-        std::bind(&TrackNode::cameraBack_timer_callback,this)
-    );    
+    // //定时器读取右前摄像头内容
+    // rightFrontTimer_ = this->create_wall_timer(
+    //     std::chrono::milliseconds(30),
+    //     std::bind(&TrackNode::cameraRightFront_timer_callbcak,this)
+    // );
+    // //定时器读取左摄像头内容
+    // leftTimer_ = this->create_wall_timer(
+    //     std::chrono::milliseconds(30),
+    //     std::bind(&TrackNode::cameraLeft_timer_callback,this)
+    // );
+    // rightTimer_ = this->create_wall_timer(
+    //     std::chrono::milliseconds(30),
+    //     std::bind(&TrackNode::cameraRight_timer_callback,this)
+    // );
+    // backTimer_ = this->create_wall_timer(
+    //     std::chrono::milliseconds(30),
+    //     std::bind(&TrackNode::cameraBack_timer_callback,this)
+    // );    
     
 
 }
@@ -101,13 +109,13 @@ void TrackNode::camera_timer_callback(){
         return;
     }
     if (!frame.empty()){
-        // cv::Mat binary = this->hls_process(frame);
-        // int error = this->showLine(binary,frame);
-        // std::cout << "error:" << error << std::endl;
+        cv::Mat binary = this->hls_process(frame);
+        int error = this->showLine(binary,frame);
+        std::cout << "error:" << error << std::endl;
 
-        // cv::Mat small;
-        // cv::resize(binary, small, cv::Size(), 0.5, 0.5);  // 缩小一半
-        // cv::imshow("binary", small);
+        cv::Mat small;
+        cv::resize(binary, small, cv::Size(), 0.5, 0.5);  // 缩小一半
+        cv::imshow("binary", small);
         cv::Mat small_frame;
         cv::resize(frame,small_frame,cv::Size(),0.5,0.5);
         cv::imshow("camera_leftfront",small_frame);
@@ -191,16 +199,13 @@ cv::Mat TrackNode::hls_process(const cv::Mat& oriFrame){
     cv::Mat l = channels[1];
     cv::Mat s = channels[2];
 
-    // 固定阈值
-    int hmin = 0,   hmax = 180;
-    int smin = 0,   smax = 255;
-    int lmin = 0,   lmax = 140;
+
 
     // 阈值二值化
     cv::Mat h_binary, s_binary, l_binary, binary;
-    cv::inRange(h, cv::Scalar(hmin), cv::Scalar(hmax), h_binary);
-    cv::inRange(s, cv::Scalar(smin), cv::Scalar(smax), s_binary);
-    cv::inRange(l, cv::Scalar(lmin), cv::Scalar(lmax), l_binary);
+    cv::inRange(h, cv::Scalar(hmin_), cv::Scalar(hmax_), h_binary);
+    cv::inRange(s, cv::Scalar(smin_), cv::Scalar(smax_), s_binary);
+    cv::inRange(l, cv::Scalar(lmin_), cv::Scalar(lmax_), l_binary);
 
     // 三通道与操作，并取反
     cv::bitwise_and(h_binary, s_binary, binary);
@@ -210,46 +215,106 @@ cv::Mat TrackNode::hls_process(const cv::Mat& oriFrame){
     return binary;
 }
 
-int TrackNode::showLine(const cv::Mat& binary,cv::Mat& frame){
-    //取底部1/3为roi
-    cv::Rect roi_rect(0,binary.rows*2/3,binary.cols,binary.rows/3);
-    cv::Mat roi = binary(roi_rect);
-    // cv::imshow("roi",roi);
-    std::vector<std::vector<cv::Point>> contours;//定义存放轮廓的容器
-    cv::findContours(roi,contours,cv::RETR_EXTERNAL,cv::CHAIN_APPROX_SIMPLE);//在roi中找出最外层轮廓，存储在contours中
+int TrackNode::showLine(const cv::Mat& binary, cv::Mat& frame) {
+    int img_width = binary.cols;
+    int img_height = binary.rows;
 
-    if (!contours.empty()){
-        //找出最大轮廓
-        auto max_contour = *std::max_element(contours.begin(), contours.end(),
-            [](const auto& a, const auto& b){
-                return cv::contourArea(a) < cv::contourArea(b);
-            });
-        //绘制轮廓
-        cv::drawContours(frame,std::vector<std::vector<cv::Point>>{max_contour},
-                        -1,cv::Scalar(0,255,0),2,cv::LINE_8,
-                        cv::noArray(),INT_MAX,cv::Point(0,binary.rows*2/3));
-        //计算质心
-        cv::Moments M = cv::moments(max_contour);
-        if (M.m00 > 0){
-            int cx = int(M.m10 / M.m00);
-            int cy = int(M.m01 / M.m00);
-            //绘制质心
-            cv::circle(frame,cv::Point(cx,cy+binary.rows*2/3),
-                        5,cv::Scalar(0,0,255),-1);
-            //画中心线和误差线
-            int center_x = frame.cols / 2;
-            cv::line(frame,cv::Point(center_x,frame.rows),
-                    cv::Point(cx,cy+binary.rows*2/3),
-                    cv::Scalar(255,0,0),2);
-            //返回偏差
-            return cx - center_x - LEFT;
-        }
-    }
-    else {
+    // ROI: 底部1/3，中间2/3宽
+    int roi_y = img_height * 2 / 3;
+    int roi_h = img_height / 3;
+    int roi_x = img_width / 6;
+    int roi_w = img_width * 2 / 3;
+
+    cv::Rect roi_rect(roi_x, roi_y, roi_w, roi_h);
+    cv::Mat roi = binary(roi_rect);
+
+    // 查找轮廓
+    std::vector<std::vector<cv::Point>> contours;
+    cv::findContours(roi, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+    if (contours.empty()) {
         std::cout << "Not Found Line!" << std::endl;
+        return 0;
     }
+
+    // 取最大轮廓
+    auto max_contour = *std::max_element(contours.begin(), contours.end(),
+        [](const auto& a, const auto& b) { return cv::contourArea(a) < cv::contourArea(b); });
+
+    // 绘制轮廓
+    cv::drawContours(frame, std::vector<std::vector<cv::Point>>{max_contour},
+                     -1, cv::Scalar(0,255,0), 2, cv::LINE_8,
+                     cv::noArray(), INT_MAX, cv::Point(roi_x, roi_y));
+
+    // 创建填充掩码
+    cv::Mat mask = cv::Mat::zeros(roi.size(), CV_8UC1);
+    cv::fillPoly(mask, std::vector<std::vector<cv::Point>>{max_contour}, cv::Scalar(255));
+
+    // 提取中心线（骨架）
+    cv::Mat skeleton = cv::Mat::zeros(mask.size(), CV_8UC1);
+    cv::Mat temp;
+    cv::Mat eroded;
+    cv::Mat element = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(3, 3));
+
+    do {
+        cv::erode(mask, eroded, element);
+        cv::dilate(eroded, temp, element);
+        cv::subtract(mask, temp, temp);
+        cv::bitwise_or(skeleton, temp, skeleton);
+        eroded.copyTo(mask);
+    } while (cv::countNonZero(mask) != 0);
+
+    // 将中心线转换回原图坐标并绘制
+    std::vector<cv::Point> skeleton_points;
+    cv::findNonZero(skeleton, skeleton_points);
+    for (const auto& pt : skeleton_points) {
+        cv::circle(frame, cv::Point(pt.x + roi_x, pt.y + roi_y), 2, cv::Scalar(0, 0, 255), -1);
+    }
+    publishSkeletonPoints(skeleton_points, roi_x, roi_y);
+
     return 0;
 }
+
+
+
+void TrackNode::saveContourToJson(const std::vector<cv::Point>& contour, const std::string& filename) {
+    nlohmann::json j;
+    j["contour"] = nlohmann::json::array();
+
+    for (auto& p : contour) {
+        j["contour"].push_back({ {"x", p.x}, {"y", p.y} });
+    }
+
+    std::ofstream file(filename);
+    if (file.is_open()) {
+        file << j.dump(4); // 缩进 4 个空格，更好阅读
+        file.close();
+        std::cout << "Saved contour to " << filename << std::endl;
+    } else {
+        std::cerr << "Failed to open file " << filename << std::endl;
+    }
+}
+
+void TrackNode::publishSkeletonPoints(const std::vector<cv::Point> &points,
+                                      int roi_x, int roi_y)
+{
+    track::msg::SkeletonPoints msg;
+    msg.header.stamp = this->now();
+    msg.header.frame_id = "base_link"; // 视情况修改
+
+    msg.points.reserve(points.size());
+    for (const auto &pt : points) {
+        geometry_msgs::msg::Point p;
+        p.x = pt.x + roi_x;
+        p.y = pt.y + roi_y;
+        p.z = 0.0;
+        msg.points.push_back(p);
+    }
+
+    skeleton_pub_->publish(msg);
+}
+
+
 
 //====================运动控制====================//
 //测试案例，通过调节线的方向，控制轮子转动的方向

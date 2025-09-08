@@ -6,6 +6,10 @@
 #include <opencv2/opencv.hpp>
 #include <geometry_msgs/msg/twist_stamped.hpp>
 
+#include <geometry_msgs/msg/point.hpp>
+
+#include "track/msg/skeleton_points.hpp" 
+
 
 class TrackNode : public rclcpp::Node{
 private:
@@ -25,8 +29,9 @@ private:
 
     rclcpp::TimerBase::SharedPtr displayTimer_;
 
-    cv::Mat frame_leftfront_,frame_rightfront_,frame_left_,frame_right_,frame_back_;
-    std::mutex mtx_;
+    rclcpp::Publisher<track::msg::SkeletonPoints>::SharedPtr skeleton_pub_;
+
+
 
     // HLS 阈值参数（滑动条绑定的变量）
     int hmin_, hmax_;
@@ -47,6 +52,9 @@ public:
     double prev_error = 0.0;
     double integral = 0.0;
 
+    cv::Mat frame_leftfront_,frame_rightfront_,frame_left_,frame_right_,frame_back_;
+    std::mutex mtx_;
+
     bool initCamera(cv::VideoCapture& cap,int device_id,const std::string& name);
 
     void camera_timer_callback();
@@ -63,7 +71,12 @@ public:
     
     int showLine(const cv::Mat& binary,cv::Mat& frame);
 
+    void saveContourToJson(const std::vector<cv::Point>& contour, const std::string& filename);
+
     void chassisControl(int error);
+
+    void publishSkeletonPoints(const std::vector<cv::Point> &points,
+                                    int roi_x, int roi_y);
 
 };
 

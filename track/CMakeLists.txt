@@ -5,48 +5,41 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-# find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
-
-if(BUILD_TESTING)
-  find_package(ament_lint_auto REQUIRED)
-  # the following line skips the linter which checks for copyrights
-  # comment the line when a copyright and license is added to all source files
-  set(ament_cmake_copyright_FOUND TRUE)
-  # the following line skips cpplint (only works in a git repo)
-  # comment the line when this package is in a git repo and when
-  # a copyright and license is added to all source files
-  set(ament_cmake_cpplint_FOUND TRUE)
-  ament_lint_auto_find_test_dependencies()
-endif()
-
+find_package(rosidl_default_generators REQUIRED)
 find_package(OpenCV REQUIRED)
 
-ament_package()
-
-add_executable(track_node 
-  src/track.cpp
-  # src/main.cpp
+# 先声明接口
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/SkeletonPoints.msg"
+  DEPENDENCIES std_msgs geometry_msgs
 )
 
-ament_target_dependencies(track_node rclcpp std_msgs geometry_msgs)
+# 让你的节点看到生成的消息头文件
+ament_export_dependencies(rosidl_default_runtime)
 
 include_directories(include)
 
-target_link_libraries(track_node
-  ${OpenCV_LIBS}
+add_executable(track_node src/track.cpp)
+
+ament_target_dependencies(track_node
+  rclcpp
+  std_msgs 
+  geometry_msgs
 )
 
+# 这行非常重要，确保在生成接口后再链接类型支持
+rosidl_target_interfaces(track_node
+  ${PROJECT_NAME} "rosidl_typesupport_cpp")
 
-install(TARGETS
-  track_node
-  DESTINATION lib/${PROJECT_NAME}
-)
+target_link_libraries(track_node ${OpenCV_LIBS})
 
-install(
-  DIRECTORY launch
-  DESTINATION share/${PROJECT_NAME}/
-)
+install(TARGETS track_node
+  DESTINATION lib/${PROJECT_NAME})
+install(DIRECTORY launch msg
+  DESTINATION share/${PROJECT_NAME}/)
+
+ament_package()
